@@ -1,0 +1,45 @@
+---
+title: "preprocessing"
+author: "Lina Walkowiak"
+date: "2025-05-02"
+output: html_document
+---
+```{r}
+# Load packages
+library(dplyr)
+library(lubridate)
+library(readr)
+
+# Read data
+df <- read_csv("listings.csv")
+
+# Step 2: Select relevant columns
+df_clean <- df %>%
+  select(id = airbnb_id,
+         neighbourhood = neighbourhood_cleansed,
+         latitude,
+         longitude,
+         price,
+         room_type,
+         property_type,
+         first_review,
+         number_of_reviews)
+
+# Step 3: Parse dates
+df_clean <- df_clean %>%
+  mutate(first_review = as.Date(first_review, format = "%d.%m.%y"))
+
+# Step 4: Create presence flag for 2015
+df_clean <- df_clean %>%
+  mutate(in_2015 = if_else(!is.na(first_review) & first_review <= as.Date("2015-12-31"), 1, 0))
+
+# Step 5: Clean price column
+df_clean <- df_clean %>%
+  mutate(price = as.numeric(gsub("[$,]", "", price)))
+
+# Optional: quick check
+summary(df_clean$in_2015)
+table(df_clean$in_2015)
+
+```
+
