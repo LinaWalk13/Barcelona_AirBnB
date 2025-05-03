@@ -11,35 +11,80 @@ library(lubridate)
 library(readr)
 
 # Read data
-df <- read_csv("listings.csv")
+listings <- read_csv("../data/listings.csv")
 
-# Step 2: Select relevant columns
-df_clean <- df %>%
-  select(id = airbnb_id,
-         neighbourhood = neighbourhood_cleansed,
-         latitude,
-         longitude,
-         price,
-         room_type,
-         property_type,
-         first_review,
-         number_of_reviews)
+# Parse dates to get year information
+listings <- listings %>%
+  select(id, 
+         host_id, 
+         host_neighbourhood, 
+         neighbourhood_cleansed,
+         first_review, 
+         latitude, 
+         host_listings_count,
+         longitude, 
+         property_type, 
+         room_type, 
+         price
+         ) 
+listings <- listings %>%
+   mutate(first_review = as.Date(first_review, format = "%d.%m.%y"))
 
-# Step 3: Parse dates
-df_clean <- df_clean %>%
-  mutate(first_review = as.Date(first_review, format = "%d.%m.%y"))
-
-# Step 4: Create presence flag for 2015
-df_clean <- df_clean %>%
+# create presence flag for 2015
+listings <- listings %>%
   mutate(in_2015 = if_else(!is.na(first_review) & first_review <= as.Date("2015-12-31"), 1, 0))
 
-# Step 5: Clean price column
-df_clean <- df_clean %>%
-  mutate(price = as.numeric(gsub("[$,]", "", price)))
+listings2015 <- listings %>%
+  filter(in_2015 == 1)
+```
 
-# Optional: quick check
-summary(df_clean$in_2015)
-table(df_clean$in_2015)
+## Spatial visualisation 
+```{r}
+library(sf)     
+library(ggplot2) 
+
+# Convert to sf object using longitude and latitude columns form data 
+airbnb_sf <- st_as_sf(listings, 
+                      coords = c("longitude", "latitude"), 
+                      crs = 4326)  # WGS 84 – standard lat/lon
+
+airbnb_2015 <- st_as_sf(listings2015, 
+                      coords = c("longitude", "latitude"), 
+                      crs = 4326) 
+
+
+
+###### BOUNDARIES
+
+secCens <- st_read("../data/BCN_UNITATS_ADM/0301040100_SecCens_UNITATS_ADM.shp")
+
+# info
+plot(secCens$geometry)
+head(secCens)
+st_crs(secCens)
+
+# Transform to match CRS
+secCens_4326 <- st_transform(secCens, crs = 4326)
+names(secCens_4326)
 
 ```
+
+```{r}
+
+library(tmap)
+
+tm_shape(secCens_4326) +
+  tm_polygons(col = "lightgrey", border.col = "black", alpha = 0.5) +
+tm_shape(airbnb_2015) +
+  tm_dots(col = "red", size = 0.03, 
+          title = "Airbnb presence in 2015", 
+          legend.show = TRUE) +
+tm_layout(title = "Airbnb Listings and Administrative Units in Barcelona",
+          legend.outside = TRUE)
+
+
+
+```
+
+
 
