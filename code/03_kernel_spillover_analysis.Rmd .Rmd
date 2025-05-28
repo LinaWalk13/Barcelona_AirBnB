@@ -1,0 +1,169 @@
+---
+title: "03 - Kernel-Based Spillover"
+author: "Lina Walkowiak"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Kernel-Based Spillover from Airbnb Listings (Outside Section)
+
+In this script, we compute a **spillover metric** for each census section that measures the intensity of Airbnb presence *just outside* its borders to account for the proximity of airbnbs that are not included in teh density measure. The idea is that Airbnb activity nearby (but not within) a section can still influence its socio-economic development, e.g., through housing pressure, tourist behavior, or property investment.
+
+- Only include listings **outside** the section.
+- Use the **distance to the section's border** (not centroid here?).
+- Apply a **kernel function** to weight each nearby listing based on distance (closer = stronger influence)
+
+### Load packages and data
+```{r}
+library(sf)
+library(dplyr)
+library(geosphere)
+library(purrr)
+library(readr)
+
+# Load spatial objects
+census_sections <- readRDS("../data/processed/census_sections.rds")
+listings2015_sf <- readRDS("../data/processed/listings2015_sf.rds")
+listings2025_sf <- readRDS("../data/processed/listings_sf.rds")
+
+### 
+projected_crs <- 25831  # Use a projected one for distance-based calculations
+census_sections <- st_transform(census_sections, crs = projected_crs)
+listings2015_sf <- st_transform(listings2015_sf, crs = projected_crs)
+listings2025_sf <- st_transform(listings2025_sf, crs = projected_crs)
+
+
+# Read previous internal mapping of listings
+listings2015_within <- st_join(listings2015_sf, census_sections["census_id"], left = FALSE)
+listings2025_within <- st_join(listings2025_sf, census_sections["census_id"], left = FALSE)
+```
+
+### Prepare border geometries for all sections
+```{r}
+census_edges <- census_sections %>%
+  select(census_id) %>%
+  st_boundary()
+```
+
+### Define kernel weighting function
+```{r}
+kernel_weight <- function(distance, sigma = 300) {
+  exp(-distance / sigma)  # Exponential decay kernel? we can try different things here
+}
+```
+
+### Function to compute kernel spillover for one section
+```{r}
+compute_kernel_spillover <- function(target_id, borders, listings, listings_within, sigma = 300) {
+  border_geom <- borders %>% filter(census_id == target_id)
+
+  # Listings not in this census section
+  listings_outside <- listings %>%
+    filter(!(id %in% listings_within$id[listings_within$census_id == target_id]))
+
+  if (nrow(listings_outside) == 0) {
+    return(tibble(census_id = target_id, kernel_spillover = 0))
+  }
+
+  # Distance from each external listing to border
+  distances <- st_distance(listings_outside, border_geom)
+  distances_m <- as.numeric(distances)  # Convert units here
+
+  weights <- kernel_weight(distances_m, sigma)
+  spillover_sum <- sum(weights, na.rm = TRUE)
+
+  tibble(census_id = target_id, kernel_spillover = spillover_sum)
+}
+```
+
+### Apply to all sections
+```{r}
+sigmas <- c(100, 300, 500)
+
+kernel_spillovers_2015 <- map_dfr(
+  sigmas,
+  function(s) {
+    map_dfr(
+      census_sections$census_id,
+      function(c_id) {
+        out <- compute_kernel_spillover(
+          c_id,
+          borders = census_edges,
+          listings = listings2015_sf,
+          listings_within = listings2015_within,
+          sigma = s
+        )
+        # Attach correct census_id manually
+        out$census_id <- c_id
+        out
+      }
+    ) %>%
+      mutate(sigma = s)
+  }
+)
+
+
+# for 2025
+
+kernel_spillovers_2025 <- map_dfr(
+  sigmas,
+  function(s) {
+    map_dfr(
+      census_sections$census_id,
+      function(c_id) {
+        out <- compute_kernel_spillover(
+          c_id,
+          borders = census_edges,
+          listings = listings2025_sf,
+          listings_within = listings2025_within,
+          sigma = s
+        )
+        # Attach correct census_id manually
+        out$census_id <- c_id
+        out
+      }
+    ) %>%
+      mutate(sigma = s)
+  }
+)
+
+
+
+# pivot to wide
+spillover_all_2015 <-  kernel_spillovers_2015 %>%
+  mutate(sigma = paste0("kernel_spill_", sigma)) %>%
+  pivot_wider(names_from = sigma, values_from = kernel_spillover)
+
+spillover_all_2025 <-  kernel_spillovers_2025 %>%
+  mutate(sigma = paste0("kernel_spill_", sigma)) %>%
+  pivot_wider(names_from = sigma, values_from = kernel_spillover)
+
+```
+
+### Join to main dataset
+```{r}
+full_df <- readRDS("../data/processed/census_analysis_before.rds")
+
+before_final <- left_join(spillover_all, full_df, by = "census_id")
+
+# Save result
+saveRDS(before_final, "../data/processed/before_final.rds")
+```
+## PLot sigma 
+```{r}
+library(ggplot2)
+ggplot() +
+  geom_sf(data = census_sections) +
+  geom_sf(data = listings2015_sf, alpha = 0.5) +
+  geom_sf(data = st_buffer(listings2015_sf, dist = 300), fill = "red", alpha = 0.1) +
+  ggtitle("Visualizing Sigma = 300m")
+
+```
+```{r}
+panel_data <- bind_rows(census_analysis_before %>% mutate(year = 2015, post = 0),
+                        census_analysis_after %>% mutate(year = 2024, post = 1))
+saveRDS(panel_data, "../data/processed/both_years.rds")
+```
+
+
+

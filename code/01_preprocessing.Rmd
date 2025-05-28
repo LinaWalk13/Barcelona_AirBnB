@@ -1,0 +1,401 @@
+---
+title: "01 - Data Preprocessing"
+author: "Lina Walkowiak"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Datasets overview
+
+| File Name                              | Year(s) | Description                                              | Use in Analysis                                     |
+|------------------|------------------|------------------|-------------------|
+| `2015_disposable_income.csv`           | 2015    | Disposable income per person                             | Baseline income level                               |
+| `2021_disposable_income.csv`           | 2021    | Disposable income per person                             | Later income level → compute Δincome                |
+| `2015_population_edu_sex.csv`          | 2015    | Education level and sex composition                      | Baseline education structure                        |
+| `2024_16_over_education_sex.csv`       | 2024    | Education (age 16+) by sex                               | Compare with 2015 → compute Δeducation              |
+| `2015_Number_size_cadastral_value.csv` | 2015    | Number, size, and cadastral value of housing units       | Baseline housing stock and value                    |
+| `2025_Number_size_cadastral_value.csv` | 2025    | Same as above                                            | Compare with 2015 → compute Δhousing units or value |
+| `2018_ownership_cadastral.csv`         | 2018    | Cadastral value by owner type (e.g., private, corporate) | Intermediate ownership baseline                     |
+| `2025_ownership_cadastral.csv`         | 2025    | Updated cadastral ownership info                         | Compare with 2018 → compute Δownership patterns     |
+
+------------------------------------------------------------------------
+
+### Socio-Economic Datasets
+
+To investigate the socio-spatial impacts of Airbnb in Barcelona, we integrate several socio-economic datasets at the **census section (Secció Censal)** level. These datasets capture changes in income, education, housing structure, and ownership between 2015 and 2025 (or what years data is available for closest to these years).
+
+### Disposable income
+
+-   Proxy for neighborhood affluence. Rising income levels may indicate socio-economic upgrading, displacement of lower-income residents, or gentrification.
+-   Compare income between 2015 and 2021 to compute `delta_income = income_2021 − income_2015` per census section. Test whether has risen more in areas with high Airbnb presence in 2015.
+
+### Education level
+
+-   Proxy for social class and educational stratification. Increasing share of tertiary-educated residents may signal higher-class influx.
+-   Calculate change in the proportion of tertiary education from 2015 to 2024. Use as `delta_education` to compare educational shifts across high/low airbnb areas.
+
+### Housing units and value
+
+-   Indicates real estate dynamics. Rising housing unit counts or cadastral values may reflect real estate investment, tourism-related conversions, or housing pressure.
+
+-   Compute `delta_units` and `delta_cadastral_value` to quantify shifts in the housing stock and value.
+
+### Ownership structure
+
+-   Shifts from local/private ownership to corporate or foreign ownership may reflect the commodification of residential real estate.
+-   Calculate `delta_foreign_ownership` or `delta_corporate_ownership`. Assess whether Airbnb areas became more investor-driven compared to control areas.
+
+### Combining with airbnb data
+
+Each dataset is matched by `Seccio_Censal` and merged with listing data from 2015. This enables: - Comparisons (statistical method to be decided) - Mapping or visualization, maybe also identifying clusters??
+
+------------------------------------------------------------------------
+
+```{r}
+library(dplyr)
+library(lubridate)
+library(readr)
+library(sf)
+library(stringr)
+library(tidyr)
+```
+
+# Data preprocessing
+
+## Missing function
+```{r}
+check_missing_ids <- function(data, reference_ids, data_name = "dataset") {
+  missing_ids <- setdiff(reference_ids, unique(data$census_id))
+  message(glue::glue("{data_name}: {length(missing_ids)} census_id(s) missing"))
+  if (length(missing_ids) > 0) {
+    return(missing_ids)
+  } else {
+    return(invisible(NULL))
+  }
+}
+```
+
+
+## Load and clean data
+```{r}
+# Load census shapefile
+census_sections <- st_read("../data/BCN_UNITATS_ADM/0301040100_SecCens_UNITATS_ADM.shp") %>%
+  mutate(census_id = paste0(str_pad(DISTRICTE, 2, pad = "0"),
+                            str_pad(SEC_CENS, 3, pad = "0")))
+
+
+# for missing data checks 
+reference_ids <- census_sections$census_id 
+```
+
+### Airbnb listings
+```{r}
+listings <- read_csv("../data/listings.csv") %>%
+  select(id, host_id, first_review, latitude, longitude,
+         room_type, price) %>%
+  mutate(
+    first_review = as.Date(first_review, format = "%d.%m.%y"),
+    in_2015 = if_else(!is.na(first_review) & first_review <= as.Date("2015-12-31"), 1, 0),
+    room_type = case_when(
+      room_type == "Entire home/apt" ~ "Entire",
+      room_type %in% c("Private room", "Shared room") ~ "Room",
+      TRUE ~ "Other"
+    )
+  )
+
+listings2015 <- listings %>% filter(in_2015 == 1)
+
+listings_sf <- st_as_sf(listings, coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs = st_crs(census_sections))
+
+listings2015_sf <- st_as_sf(listings2015, coords = c("longitude", "latitude"), crs = 4326) %>% 
+  st_transform(crs = st_crs(census_sections))
+```
+
+```{r}
+listings_joined <- st_join(listings_sf, census_sections, left = FALSE)
+listings2015_joined <- st_join(listings2015_sf, census_sections, left = FALSE)
+
+count_listings <- function(joined_data, var_name) {
+  joined_data %>%
+    mutate(census_id = paste0(str_pad(DISTRICTE, 2, pad = "0"),
+                              str_pad(SEC_CENS, 3, pad = "0"))) %>%
+    group_by(census_id) %>%
+    summarise(!!var_name := n(), .groups = "drop")
+}
+
+listings_count_2015 <- count_listings(listings2015_joined, "airbnb_listings_2015")
+listings_count_2025 <- count_listings(listings_joined, "airbnb_listings")
+```
+
+
+
+#### Spillover effect: Airbnb proximity to census sections
+##### Border-based (polygon buffers) spillover
+To measure how many Airbnb listings are located just outside a census section — within a defined distance (e.g., 300m or 500m) — while excluding listings already inside the section itself and ignoring distances so that each airbnb within the buffer weights evenly. This is not used in our analysis anyways, but replaced by the Gaussian kernel that assigns weights to the distances. 
+
+```{r}
+compute_border_spillover <- function(census, listings, internal_counts, dist) {
+  buffer <- st_buffer(census, dist = dist)
+  listings_in_buffer <- st_join(buffer, listings, left = FALSE) %>%
+    group_by(census_id) %>%
+    summarise(n_listings = n(), .groups = "drop") %>%
+    st_drop_geometry()
+
+  spillover <- listings_in_buffer %>%
+    left_join(internal_counts, by = "census_id") %>%
+    mutate(
+      airbnb_listings_2015 = replace_na(airbnb_listings_2015, 0),
+      !!paste0("border_spillover_", dist, "m") := n_listings - airbnb_listings_2015
+    ) %>%
+    select(census_id, starts_with("border_spillover_"))
+
+  return(spillover)
+}
+
+border_spillover_300 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 300)
+border_spillover_500 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 500)
+```
+
+## Population data 
+```{r}
+pop_2015 <- read_csv("../data/2015_population.csv") %>%
+  mutate(
+    census_id = paste0(
+      str_pad(Codi_Districte, 2, pad = "0"),
+      str_sub(Seccio_Censal, -3, -1)  # take last 3 digits
+    )
+  ) %>%
+  group_by(census_id) %>%
+  summarise(population_2015 = sum(Valor, na.rm = TRUE), .groups = "drop")
+
+
+pop_2024 <- read_csv("../data/2024_population.csv") %>%
+  mutate(
+    census_id = paste0(
+      str_pad(Codi_Districte, 2, pad = "0"),
+      str_sub(Seccio_Censal, -3, -1)  # take last 3 digits
+    )
+  ) %>%
+  group_by(census_id) %>%
+  summarise(population_2015 = sum(Valor, na.rm = TRUE), .groups = "drop")
+
+
+```
+
+
+### Income data
+```{r}
+read_income <- function(file) {
+  read_csv(file) %>%
+    mutate(census_id = paste0(str_pad(Codi_Districte, 2, pad = "0"),
+                              str_pad(Seccio_Censal, 3, pad = "0")))
+}
+
+income_2015 <- read_income("../data/2015_disposable_income.csv")
+income_2021 <- read_income("../data/2021_disposable_income.csv")
+
+
+# check missing ids 
+check_missing_ids(income_2015, reference_ids, "Income 2015")
+check_missing_ids(income_2021, reference_ids, "Income 2021")
+```
+
+### Education data
+```{r}
+edu_2015 <- read_csv("../data/2015_population_edu_sex.csv") %>%
+  mutate(
+    census_id = paste0(
+      str_pad(Codi_Districte, 2, pad = "0"),
+      str_pad(str_sub(as.character(Seccio_Censal), -3), 3, pad = "0")
+    ),
+    Valor = as.numeric(Valor)
+  ) %>%
+  group_by(census_id, NIV_EDUCA_esta) %>%
+  summarise(total = sum(Valor, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = NIV_EDUCA_esta, values_from = total,
+              names_prefix = "edu_level_", values_fill = 0) %>%
+  mutate(
+    total_population = rowSums(across(starts_with("edu_level_")))
+  )
+
+edu_2024 <- read_csv("../data/2024_population_edu_sex.csv") %>%
+  mutate(
+    census_id = paste0(
+      str_pad(Codi_Districte, 2, pad = "0"),
+      str_pad(str_sub(as.character(Seccio_Censal), -3), 3, pad = "0")
+    ),
+    Valor = as.numeric(Valor)
+  ) %>%
+  group_by(census_id, NIV_EDUCA_esta) %>%
+  summarise(total = sum(Valor, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = NIV_EDUCA_esta, values_from = total,
+              names_prefix = "edu_level_", values_fill = 0) %>%
+  mutate(
+    total_population = rowSums(across(starts_with("edu_level_")))
+  )
+
+check_missing_ids(edu_2015, reference_ids, "EDu 2015")
+check_missing_ids(edu_2024, reference_ids, "EDu 2024")
+
+```
+
+
+### Ownership data
+```{r}
+process_ownership <- function(file) {
+  read_csv(file) %>%
+    filter(Concepte == "Nombre") %>%
+    mutate(
+      census_id = paste0(
+        str_pad(Codi_districte, 2, pad = "0"),
+        str_pad(Seccio_censal, 3, pad = "0")
+      )
+    ) %>%
+    group_by(census_id, Desc_tipus_propietari, Concepte) %>%
+    summarise(value = sum(Valor, na.rm = TRUE), .groups = "drop") %>%
+    pivot_wider(
+      names_from = c(Desc_tipus_propietari, Concepte),
+      values_from = value,
+      values_fill = 0
+    ) %>%
+    rename(
+      other_owners = `Altres_Nombre`,
+      individual_owners = `Subjecte físic_Nombre`,
+      legal_entity_owners = `Subjecte jurídic_Nombre`,
+      hoa_owners = `Comunitat de propietaris_Nombre`
+    ) %>%
+    mutate(
+      total_owners = individual_owners + legal_entity_owners + hoa_owners + other_owners,
+      pct_legal_entity = legal_entity_owners / total_owners
+    )
+}
+
+
+ownership_2018_wide <- process_ownership("../data/2018_ownership_cadastral.csv")
+ownership_2025_wide <- process_ownership("../data/2025_ownership_cadastral.csv")
+
+check_missing_ids(ownership_2018_wide, reference_ids, "ownership 2018")
+
+
+```
+
+## Join all data
+```{r}
+# --- Merge datasets: BEFORE and AFTER ---
+
+# Start from full census section IDs to avoid dropping areas with no Airborne listings etc.
+census_analysis_before <- census_sections %>%
+  st_drop_geometry() %>%
+  select(census_id) %>%
+  left_join(listings_count_2015, by = "census_id") %>%
+  left_join(income_2015, by = "census_id") %>%
+  left_join(ownership_2018_wide, by = "census_id") %>%
+  left_join(edu_2015, by = "census_id") %>%
+  left_join(border_spillover_300, by = "census_id") %>%
+  left_join(border_spillover_500, by = "census_id") %>%
+  mutate(
+    border_spillover_300m = replace_na(border_spillover_300m, 0),
+    border_spillover_500m = replace_na(border_spillover_500m, 0)
+  )
+
+census_analysis_after <- census_sections %>%
+  st_drop_geometry() %>%
+  select(census_id) %>%
+  left_join(listings_count_2025, by = "census_id") %>%
+  left_join(income_2021, by = "census_id") %>%
+  left_join(ownership_2025_wide, by = "census_id") %>%
+  left_join(edu_2024, by = "census_id")
+
+# Check for completeness
+check_missing_ids(census_analysis_before, reference_ids, "census_analysis_before")
+check_missing_ids(census_analysis_after, reference_ids, "census_analysis_after")
+
+# --- Calculate education shares ---
+census_analysis_before <- census_analysis_before %>%
+  mutate(
+    pct_edu_1 = edu_level_1 / total_population,
+    pct_edu_2 = edu_level_2 / total_population,
+    pct_edu_3 = edu_level_3 / total_population,
+    pct_edu_4 = edu_level_4 / total_population,
+    pct_edu_5 = edu_level_5 / total_population,
+    pct_edu_6 = edu_level_6 / total_population
+  )
+
+census_analysis_after <- census_analysis_after %>%
+  mutate(
+    pct_edu_1 = edu_level_1 / total_population,
+    pct_edu_2 = edu_level_2 / total_population,
+    pct_edu_3 = edu_level_3 / total_population,
+    pct_edu_4 = edu_level_4 / total_population,
+    pct_edu_5 = edu_level_5 / total_population,
+    pct_edu_6 = edu_level_6 / total_population
+  )
+
+```
+
+
+## Normalise population 
+```{r}
+census_analysis_before <- census_analysis_before %>%
+  left_join(pop_2015, by = "census_id") %>%
+  mutate(
+    airbnb_per_1000_2015 = airbnb_listings_2015 / (population_2015 / 1000)
+  )
+
+census_analysis_after <- census_analysis_after %>%
+  left_join(pop_2024, by = "census_id")%>%
+  mutate(
+    airbnb_per_1000_2024 = airbnb_listings / (total_population / 1000)
+  )
+```
+
+
+## Add delta variables
+```{r}
+merged_delta <- census_analysis_before %>%
+  rename_with(~ paste0(., "_before"), -c(census_id, geometry)) %>%
+  left_join(
+    census_analysis_after %>%
+      rename_with(~ paste0(., "_after"), -c(census_id, geometry)),
+    by = "census_id"
+  ) %>%
+  mutate(
+    # Education deltas
+    delta_pct_edu_1 = pct_edu_1_after - pct_edu_1_before,
+    delta_pct_edu_2 = pct_edu_2_after - pct_edu_2_before,
+    delta_pct_edu_3 = pct_edu_3_after - pct_edu_3_before,
+    delta_pct_edu_4 = pct_edu_4_after - pct_edu_4_before,
+    delta_pct_edu_5 = pct_edu_5_after - pct_edu_5_before,
+    delta_pct_edu_6 = pct_edu_6_after - pct_edu_6_before,
+
+    # Legal ownership delta
+    delta_pct_legal_entity = pct_legal_entity_after - pct_legal_entity_before,
+
+    # Income delta
+    delta_income = Import_Euros_after - Import_Euros_before,
+
+    # Population delta
+    delta_population = total_population_after - total_population_before
+  )
+
+# check completeness
+check_missing_ids(merged_delta, reference_ids, "merged_delta")
+
+```
+
+
+
+## Save preprocessed data
+```{r}
+# --- Save outputs ---
+dir.create("../data/processed", showWarnings = FALSE)
+
+saveRDS(census_analysis_before, "../data/processed/before_processed.rds")
+saveRDS(census_analysis_after, "../data/processed/after_processed.rds")
+saveRDS(census_sections, "../data/processed/census_sections.rds")
+saveRDS(merged_delta, "../data/processed/merged_data_delta.rds")
+saveRDS(listings2015_sf, "../data/processed/listings2015_sf.rds")
+saveRDS(listings_sf, "../data/processed/listings_sf.rds")
+
+```
