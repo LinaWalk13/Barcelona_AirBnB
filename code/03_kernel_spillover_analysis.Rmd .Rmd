@@ -142,13 +142,25 @@ spillover_all_2025 <-  kernel_spillovers_2025 %>%
 
 ### Join to main dataset
 ```{r}
-full_df <- readRDS("../data/processed/census_analysis_before.rds")
-
-before_final <- left_join(spillover_all, full_df, by = "census_id")
-
-# Save result
+full_2015 <- readRDS("../data/processed/before_processed.rds")
+before_final <- left_join(spillover_all_2015, full_2015, by = "census_id")
 saveRDS(before_final, "../data/processed/before_final.rds")
+
+
+# same for later year
+full_2025 <- readRDS("../data/processed/after_processed.rds")
+after_final <- left_join(spillover_all_2025, full_2025, by = "census_id")
+saveRDS(after_final, "../data/processed/after_final.rds")
 ```
+
+
+```{r}
+panel_data <- bind_rows(before_final %>% mutate(year = 2015, post = 0),
+                        after_final %>% mutate(year = 2024, post = 1))
+saveRDS(panel_data, "../data/processed/both_years.rds")
+```
+
+
 ## PLot sigma 
 ```{r}
 library(ggplot2)
