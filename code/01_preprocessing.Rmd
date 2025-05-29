@@ -124,7 +124,7 @@ count_listings <- function(joined_data, var_name) {
     summarise(!!var_name := n(), .groups = "drop")
 }
 
-listings_count_2015 <- count_listings(listings2015_joined, "airbnb_listings_2015")
+listings_count_2015 <- count_listings(listings2015_joined, "airbnb_listings")
 listings_count_2025 <- count_listings(listings_joined, "airbnb_listings")
 ```
 
@@ -135,26 +135,26 @@ listings_count_2025 <- count_listings(listings_joined, "airbnb_listings")
 To measure how many Airbnb listings are located just outside a census section — within a defined distance (e.g., 300m or 500m) — while excluding listings already inside the section itself and ignoring distances so that each airbnb within the buffer weights evenly. This is not used in our analysis anyways, but replaced by the Gaussian kernel that assigns weights to the distances. 
 
 ```{r}
-compute_border_spillover <- function(census, listings, internal_counts, dist) {
-  buffer <- st_buffer(census, dist = dist)
-  listings_in_buffer <- st_join(buffer, listings, left = FALSE) %>%
-    group_by(census_id) %>%
-    summarise(n_listings = n(), .groups = "drop") %>%
-    st_drop_geometry()
-
-  spillover <- listings_in_buffer %>%
-    left_join(internal_counts, by = "census_id") %>%
-    mutate(
-      airbnb_listings_2015 = replace_na(airbnb_listings_2015, 0),
-      !!paste0("border_spillover_", dist, "m") := n_listings - airbnb_listings_2015
-    ) %>%
-    select(census_id, starts_with("border_spillover_"))
-
-  return(spillover)
-}
-
-border_spillover_300 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 300)
-border_spillover_500 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 500)
+# compute_border_spillover <- function(census, listings, internal_counts, dist) {
+#   buffer <- st_buffer(census, dist = dist)
+#   listings_in_buffer <- st_join(buffer, listings, left = FALSE) %>%
+#     group_by(census_id) %>%
+#     summarise(n_listings = n(), .groups = "drop") %>%
+#     st_drop_geometry()
+# 
+#   spillover <- listings_in_buffer %>%
+#     left_join(internal_counts, by = "census_id") %>%
+#     mutate(
+#       airbnb_listings_2015 = replace_na(airbnb_listings_2015, 0),
+#       !!paste0("border_spillover_", dist, "m") := n_listings - airbnb_listings_2015
+#     ) %>%
+#     select(census_id, starts_with("border_spillover_"))
+# 
+#   return(spillover)
+# }
+# 
+# border_spillover_300 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 300)
+# border_spillover_500 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 500)
 ```
 
 ## Population data 
@@ -167,7 +167,7 @@ pop_2015 <- read_csv("../data/2015_population.csv") %>%
     )
   ) %>%
   group_by(census_id) %>%
-  summarise(population_2015 = sum(Valor, na.rm = TRUE), .groups = "drop")
+  summarise(population = sum(Valor, na.rm = TRUE), .groups = "drop")
 
 
 pop_2024 <- read_csv("../data/2024_population.csv") %>%
@@ -178,7 +178,7 @@ pop_2024 <- read_csv("../data/2024_population.csv") %>%
     )
   ) %>%
   group_by(census_id) %>%
-  summarise(population_2015 = sum(Valor, na.rm = TRUE), .groups = "drop")
+  summarise(population = sum(Valor, na.rm = TRUE), .groups = "drop")
 
 
 ```
@@ -291,13 +291,7 @@ census_analysis_before <- census_sections %>%
   left_join(listings_count_2015, by = "census_id") %>%
   left_join(income_2015, by = "census_id") %>%
   left_join(ownership_2018_wide, by = "census_id") %>%
-  left_join(edu_2015, by = "census_id") %>%
-  left_join(border_spillover_300, by = "census_id") %>%
-  left_join(border_spillover_500, by = "census_id") %>%
-  mutate(
-    border_spillover_300m = replace_na(border_spillover_300m, 0),
-    border_spillover_500m = replace_na(border_spillover_500m, 0)
-  )
+  left_join(edu_2015, by = "census_id")
 
 census_analysis_after <- census_sections %>%
   st_drop_geometry() %>%
@@ -340,13 +334,13 @@ census_analysis_after <- census_analysis_after %>%
 census_analysis_before <- census_analysis_before %>%
   left_join(pop_2015, by = "census_id") %>%
   mutate(
-    airbnb_per_1000_2015 = airbnb_listings_2015 / (population_2015 / 1000)
+    airbnb_per_1000 = airbnb_listings / (population / 1000)
   )
 
 census_analysis_after <- census_analysis_after %>%
   left_join(pop_2024, by = "census_id")%>%
   mutate(
-    airbnb_per_1000_2024 = airbnb_listings / (total_population / 1000)
+    airbnb_per_1000 = airbnb_listings / (total_population / 1000)
   )
 ```
 
