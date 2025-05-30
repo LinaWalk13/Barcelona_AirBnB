@@ -105,6 +105,10 @@ listings <- read_csv("../data/listings.csv") %>%
 
 listings2015 <- listings %>% filter(in_2015 == 1)
 
+# only interested in full accomodation
+listings2015 <- listings2015 %>% filter(room_type == "Entire")
+listings <- listings %>% filter(room_type == "Entire")
+
 listings_sf <- st_as_sf(listings, coords = c("longitude", "latitude"), crs = 4326) %>%
   st_transform(crs = st_crs(census_sections))
 

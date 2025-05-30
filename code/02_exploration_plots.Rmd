@@ -16,11 +16,10 @@ library(ggplot2)
 
 # Load preprocessed data
 census_sections <- readRDS("../data/processed/census_sections.rds")
-listings2015 <- readRDS("../data/processed/listings2015_sf.rds")
-listings <- readRDS("../data/processed/listings_sf.rds")
-before <- readRDS("../data/processed/census_analysis_before.rds")
-after  <- readRDS("../data/processed/census_analysis_after.rds")
-combined <- readRDS("../data/processed/merged_data_delta.rds")
+combined <- readRDS("../data/processed/both_years.rds")
+before <- readRDS("../data/processed/before_final.rds")
+after <- readRDS("../data/processed/after_final.rds")
+
 
 
 
@@ -256,6 +255,35 @@ tm_shape(combined_sf) +
 
 ```
 
+## for paper 
+```{r}
+library(tmap)
+
+tmap_mode("plot")  # or "view" for interactive map
+
+tm_shape(before_sf) +
+  tm_polygons(
+    col = "Import_Euros",
+    fill.scale = tm_scale_intervals(
+      style = "quantile",   # can change to "jenks", "equal", or use breaks=
+      n = 5,
+      values = "YlOrRd"
+    ),
+    fill.legend = tm_legend(title = "Income (€)"),
+    border.col = "white",
+    col_alpha = 0.8
+  ) +
+  tm_title("Income Distribution by Census Section (2015)") +
+  tm_layout(
+    legend.outside = TRUE,
+    legend.position = c("right", "bottom"),
+    legend.frame = FALSE,
+    frame = FALSE
+  )
+
+
+
+```
 
 
 
