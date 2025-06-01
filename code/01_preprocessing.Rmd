@@ -24,33 +24,6 @@ output: html_document
 
 To investigate the socio-spatial impacts of Airbnb in Barcelona, we integrate several socio-economic datasets at the **census section (Secció Censal)** level. These datasets capture changes in income, education, housing structure, and ownership between 2015 and 2025 (or what years data is available for closest to these years).
 
-### Disposable income
-
--   Proxy for neighborhood affluence. Rising income levels may indicate socio-economic upgrading, displacement of lower-income residents, or gentrification.
--   Compare income between 2015 and 2021 to compute `delta_income = income_2021 − income_2015` per census section. Test whether has risen more in areas with high Airbnb presence in 2015.
-
-### Education level
-
--   Proxy for social class and educational stratification. Increasing share of tertiary-educated residents may signal higher-class influx.
--   Calculate change in the proportion of tertiary education from 2015 to 2024. Use as `delta_education` to compare educational shifts across high/low airbnb areas.
-
-### Housing units and value
-
--   Indicates real estate dynamics. Rising housing unit counts or cadastral values may reflect real estate investment, tourism-related conversions, or housing pressure.
-
--   Compute `delta_units` and `delta_cadastral_value` to quantify shifts in the housing stock and value.
-
-### Ownership structure
-
--   Shifts from local/private ownership to corporate or foreign ownership may reflect the commodification of residential real estate.
--   Calculate `delta_foreign_ownership` or `delta_corporate_ownership`. Assess whether Airbnb areas became more investor-driven compared to control areas.
-
-### Combining with airbnb data
-
-Each dataset is matched by `Seccio_Censal` and merged with listing data from 2015. This enables: - Comparisons (statistical method to be decided) - Mapping or visualization, maybe also identifying clusters??
-
-------------------------------------------------------------------------
-
 ```{r}
 library(dplyr)
 library(lubridate)
@@ -133,33 +106,6 @@ listings_count_2025 <- count_listings(listings_joined, "airbnb_listings")
 ```
 
 
-
-#### Spillover effect: Airbnb proximity to census sections
-##### Border-based (polygon buffers) spillover
-To measure how many Airbnb listings are located just outside a census section — within a defined distance (e.g., 300m or 500m) — while excluding listings already inside the section itself and ignoring distances so that each airbnb within the buffer weights evenly. This is not used in our analysis anyways, but replaced by the Gaussian kernel that assigns weights to the distances. 
-
-```{r}
-# compute_border_spillover <- function(census, listings, internal_counts, dist) {
-#   buffer <- st_buffer(census, dist = dist)
-#   listings_in_buffer <- st_join(buffer, listings, left = FALSE) %>%
-#     group_by(census_id) %>%
-#     summarise(n_listings = n(), .groups = "drop") %>%
-#     st_drop_geometry()
-# 
-#   spillover <- listings_in_buffer %>%
-#     left_join(internal_counts, by = "census_id") %>%
-#     mutate(
-#       airbnb_listings_2015 = replace_na(airbnb_listings_2015, 0),
-#       !!paste0("border_spillover_", dist, "m") := n_listings - airbnb_listings_2015
-#     ) %>%
-#     select(census_id, starts_with("border_spillover_"))
-# 
-#   return(spillover)
-# }
-# 
-# border_spillover_300 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 300)
-# border_spillover_500 <- compute_border_spillover(census_sections, listings2015_sf, listings_count_2015, dist = 500)
-```
 
 ## Population data 
 ```{r}
@@ -286,9 +232,9 @@ check_missing_ids(ownership_2018_wide, reference_ids, "ownership 2018")
 
 ## Join all data
 ```{r}
-# --- Merge datasets: BEFORE and AFTER ---
+# BEFORE and AFTER ---
 
-# Start from full census section IDs to avoid dropping areas with no Airborne listings etc.
+# Start from full census section IDs to avoid dropping areas with no Airbnb listings etc.
 census_analysis_before <- census_sections %>%
   st_drop_geometry() %>%
   select(census_id) %>%
@@ -386,7 +332,7 @@ check_missing_ids(merged_delta, reference_ids, "merged_delta")
 
 ## Save preprocessed data
 ```{r}
-# --- Save outputs ---
+# Save outputs
 dir.create("../data/processed", showWarnings = FALSE)
 
 saveRDS(census_analysis_before, "../data/processed/before_processed.rds")

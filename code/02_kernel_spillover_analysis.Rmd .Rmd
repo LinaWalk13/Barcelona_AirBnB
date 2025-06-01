@@ -7,7 +7,7 @@ output: html_document
 
 ### Kernel-Based Spillover from Airbnb Listings (Outside Section)
 
-In this script, we compute a **spillover metric** for each census section that measures the intensity of Airbnb presence *just outside* its borders to account for the proximity of airbnbs that are not included in teh density measure. The idea is that Airbnb activity nearby (but not within) a section can still influence its socio-economic development, e.g., through housing pressure, tourist behavior, or property investment.
+In this script, we compute a **spillover metric** for each census section that measures the intensity of Airbnb presence *just outside* its borders to account for the proximity of airbnbs that are not included in teh density measure. The idea is that Airbnb activity nearby (but not within) a section can still influence its socio-economic development, such as through housing pressure, tourist behaviour, or property investment.
 
 - Only include listings **outside** the section.
 - Use the **distance to the section's border** (not centroid here?).
@@ -173,7 +173,7 @@ write_csv(panel_data_no_geom, "../data/processed/both_years.csv")
 ```
 
 
-## PLot sigma 
+## Plot sigma 
 ```{r}
 library(ggplot2)
 ggplot() +
@@ -183,6 +183,7 @@ ggplot() +
   ggtitle("Visualizing Sigma = 300m")
 
 ```
+# Download as csv
 ```{r}
 panel_data <- bind_rows(census_analysis_before %>% mutate(year = 2015, post = 0),
                         census_analysis_after %>% mutate(year = 2024, post = 1))
