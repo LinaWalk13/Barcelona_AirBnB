@@ -4,8 +4,8 @@ This repository contains the code and data for analyzing the relationship betwee
 ## Folder Structure
 
 * `01_preprocessing.Rmd` – Preprocessing and merging of socio-economic datasets for each year.
-* `02_spillover_computation.Rmd` – Computes the kernel-weighted spillover effect from nearby Airbnb listings based on proximity to census section borders.
-* `03_plotting.Rmd` – Generates visualisations of Airbnb density, socio-economic indicators, and spatial patterns.
+* `02_kernel_spillover_analysis.Rmd` – Computes the kernel-weighted spillover effect from nearby Airbnb listings based on proximity to census section borders.
+* `03_plots.Rmd` – Generates visualisations of Airbnb density, socio-economic indicators, and spatial patterns.
 * `04_analysis.Rmd` – Runs Bayesian regression models.
 
 ## Datasets used
