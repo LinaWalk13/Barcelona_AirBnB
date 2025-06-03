@@ -1,4 +1,4 @@
-# Barcelona_AirBnB
+# Airbnb and Gentrification: The Case of Barcelona
 This repository contains the code and data for analyzing the relationship between Airbnb prevalence and socio-economic change in Barcelona. We are using spatial analysis and Bayesian modeling to explore potential indicators of gentrification at an early and late timestep.
 
 ## Folder Structure
