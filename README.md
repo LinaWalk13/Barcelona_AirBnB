@@ -15,9 +15,9 @@ All data are processed and merged at the **census-section level** using polygon 
 | Dataset                      | Years                            | Description                                                                                                           |
 | ---------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | **Disposable Income**        | 2015, 2021                       | Average disposable household income per census section.                                                               |
-| **Population**               | 2015, 2024                       | Population counts used for normalizing Airbnb density (listings per 1,000 residents).                                 |
-| **Education Levels**         | 2015, 2024                       | Share of residents with tertiary education (used as a gentrification indicator).                                      |
-| **Census Sections Polygons** | 2017                             | Shapefile delineating census section boundaries for spatial analysis.                                                 |
+| **Population**               | 2015, 2024                       | Population counts used for normalising Airbnb density (listings per 1,000 residents).                                 |
+| **Education Levels**         | 2015, 2024                       | Educational backgrounds per census section (used as a gentrification indicator).                                      |
+| **Census Sections Polygons** | 2017                             | Shapefile of census section boundaries for spatial analysis.                                                          |
 | **Airbnb Listings**          | 2015 (inferred), 2025 (observed) | Downloaded from [Inside Airbnb](http://insideairbnb.com/); 2015 listings approximated using the date of first review. |
 
 Socio-economic data was downloaded from [Open Data Barcelona](https://opendata-ajuntament.barcelona.cat/data/en/dataset). 
