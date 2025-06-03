@@ -31,4 +31,5 @@ Socio-economic data was downloaded from [Open Data Barcelona](https://opendata-a
 
 ---
 Authors: Laura Lundbye and Lina Walkowiak
+---
 Spatial Analytics Spring 2025
