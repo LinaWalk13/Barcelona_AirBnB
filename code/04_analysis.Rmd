@@ -1,0 +1,212 @@
+---
+title: "spatial"
+author: "Laura Lundbye"
+date: "2025-05-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(brms)
+```
+
+#Fititng and running the models
+
+```{r}
+setwd("C:/Users/laura/Desktop/uni/cultural_spacial")
+```
+
+```{r}
+data <- read.csv("both_years.csv")
+```
+
+## Initial preprocessing
+First, I preprocess the data further to fit with modelling requirements. This includes creating a categorical before and after column form the year column (0 for 2015 and 1 for 2024).
+Next, I investigate the distribution of the education level distribution for both years to see how I want to group the education levels.
+I remove edu_6 as its most likely a fluke category, as it's very small for 2015 and contains only 0s for 2024.
+I also remove the geometry column as it's no longer needed and causes some issues due to its shape.
+
+```{r}
+#creating before and after column and making sure it's categorical
+data$before_after <- ifelse(data$year == 2015, 0,
+                            ifelse(data$year == 2024, 1, NA))
+data <- data %>%
+  mutate(before_after = as.factor(before_after))
+
+data$geometry <- NULL
+data$pct_edu_6 <- NULL
+
+#turning NAs into 0s
+data <- data %>%
+  mutate(airbnb_per_1000 = replace_na(airbnb_per_1000, 0))
+
+#renaming column
+data <- data %>%
+  rename(disposable_income = Import_Euros)
+
+```
+
+## Plotting
+In the next two chunks, i plot the education data as two simple categorical histograms
+
+```{r}
+#plotting education for 2015
+data_2015 <- data %>% filter(year == 2015)
+
+#reshape 2015 data to long format
+edu_2015_long <- data_2015 %>%
+  select(starts_with("pct_edu_"), year) %>%
+  pivot_longer(cols = starts_with("pct_edu_"),
+               names_to = "education_level",
+               values_to = "value")
+
+#plot for 2015
+ggplot(edu_2015_long, aes(x = education_level, y = value)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Education Levels in 2015",
+       x = "Education Level",
+       y = "Percentage") +
+  theme_minimal()
+```
+
+```{r}
+#plotting education for 2024
+data_2024 <- data %>% filter(year == 2024)
+
+#reshaping
+edu_2024_long <- data_2024 %>%
+  select(starts_with("pct_edu_"), year) %>%
+  pivot_longer(cols = starts_with("pct_edu_"),
+               names_to = "education_level",
+               values_to = "value")
+
+#plot for 2024
+ggplot(edu_2024_long, aes(x = education_level, y = value)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  labs(title = "Education Levels in 2024",
+       x = "Education Level",
+       y = "Percentage") +
+  theme_minimal()
+
+```
+## Grouping education
+Based on the results in the histograms, I choose to make the cut between level 3 and 4 due to concentration.
+I then factor census_id for modelling
+
+```{r}
+data <- data %>%
+  mutate(percentage_of_edu_high = pct_edu_4 + pct_edu_5)
+
+data$census_id <- as.factor(data$census_id)
+```
+
+## Normalizing variables
+Next I normalize the spill-over effect values at 300 m, the Airbnb density per 1000 residents counts, and the disposable income counts into z-scores.
+This helps my models converge and makes for better modelling all around
+
+```{r}
+#normalizing conitnuys variables
+data <- data %>%
+  mutate(
+    kernel_spill_300_z = as.numeric(scale(kernel_spill_300)),
+    airbnb_per_1000_z = as.numeric(scale(airbnb_per_1000)),
+    disposable_income_z = as.numeric(scale(disposable_income))
+  )
+```
+
+## Education model
+Using brms, I fit my frist model. This one predicts the percentage of residents with high education in various censuses by the following predictors: the year measure, Airbnb density, the interaction of the two, the spill-over values at 300 m, and random effects for every census.
+As the education percentages are fairly spanning 0.2 - 0.8, I feel comfortable using a Gaussian family instead of a beta family or another family geared toward data between 0 and 1. Bulk Effective Samples Size (ESS) was fairly low for this model, so I cranked the chains and iterations up by quite a bit. This lets them reach a sufficient count for every beta value, as NUTS sampling can usually deal with a minimum of 1000 (check the Bulk_ESS counts in the summary for exact numbers - this model scores a lowest count of around 1700)
+The posterios are plotted and the model output is summed and printed
+
+```{r}
+model_edu <- brm(
+  formula = percentage_of_edu_high ~ before_after * airbnb_per_1000_z + kernel_spill_300_z + ( 1 | census_id),
+  data = data,
+  family = gaussian(),
+  chains = 4,
+  cores = 4,
+  iter = 3000,
+  warmup = 1500,
+  seed = 123,
+  control = list(max_treedepth = 15)
+)
+```
+
+```{r}
+summary(model_edu)
+plot(model_edu)
+```
+
+## Disposable income model
+Now I create my second model. This one predicts disposable income by the same predictors as the first model. This model scores bulk ESS scores of 2000+.
+```{r}
+model_income <- brm(
+  formula = disposable_income_z ~ before_after * airbnb_per_1000_z + kernel_spill_300_z + (1 | census_id),
+  data = data,
+  family = gaussian(),
+  chains = 4,
+  cores = 4,
+  iter = 3000,
+  warmup = 1000,
+  seed = 123
+)
+
+```
+
+```{r}
+summary(model_income)
+plot(model_income)
+```
+##Visualizing the data
+
+###Visualizing higher education percentage
+Here i plot the percentage of residents with higher education by Airbnb density for every census for both years.
+
+```{r}
+#renaming the before_after measure
+data$before_after <- factor(data$before_after, levels = c(0, 1), labels = c("2015", "2024"))
+
+ggplot(data, aes(x = airbnb_per_1000, y = percentage_of_edu_high, color = before_after)) +
+  geom_point(alpha = 0.5) +
+  geom_line(aes(group = census_id), color = "gray60", alpha = 0.2) +  # connect points from same census tract
+  geom_smooth(method = "lm", se = FALSE) +  # regression lines per year
+  labs(
+    title = "Relationship between Airbnb Density and High Education Levels",
+    x = "Airbnb Listings per 1000 Residents",
+    y = "Percentage with Higher Education",
+    color = "Year"
+  ) +
+  ylim(0, 1) +
+  theme_minimal()
+
+```
+
+###Visualizing disposable income
+Finally, I create a plot like the one above but for disposable income instead of higher education.
+
+```{r}
+#plotting income
+
+data$before_after <- factor(data$before_after, levels = c(0, 1), labels = c("2015", "2021"))
+
+ggplot(data, aes(x = airbnb_per_1000, y = disposable_income, color = before_after)) +
+  geom_point(alpha = 0.5) +
+  geom_line(aes(group = census_id), color = "gray60", alpha = 0.2) +  # connect points from same census tract
+  geom_smooth(method = "lm", se = FALSE) +  # regression lines per year
+  labs(
+    title = "Relationship between Airbnb Density and Disposable Income",
+    x = "Airbnb Listings per 1000 Residents",
+    y = "Disposable Income",
+    color = "Year"
+  ) +
+  theme_minimal()
+```
+
+
